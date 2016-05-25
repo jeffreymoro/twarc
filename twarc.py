@@ -2,13 +2,13 @@
 
 from __future__ import print_function
 
-import io
 import os
 import sys
 import json
 import time
 import logging
 import argparse
+import datetime
 import requests
 
 from requests_oauthlib import OAuth1Session
@@ -25,6 +25,9 @@ else:
     # Python 3
     get_input = input
 
+# Also in setup.py
+__version__ = '0.6.1'
+
 
 def geo(value):
     return '-74,40,-73,41'
@@ -35,12 +38,18 @@ def main():
     The twarc command line.
     """
     parser = argparse.ArgumentParser("twarc")
+    parser.add_argument('-v', '--version', action='version',
+                        version='%(prog)s {version}'.format(
+                            version=__version__))
     parser.add_argument("--search", dest="search",
                         help="search for tweets matching a query")
     parser.add_argument("--max_id", dest="max_id",
                         help="maximum tweet id to search for")
     parser.add_argument("--since_id", dest="since_id",
                         help="smallest id to search for")
+    parser.add_argument("--result_type", dest="result_type",
+                        choices=["mixed", "recent", "popular"],
+                        default="recent", help="search result type")
     parser.add_argument("--lang", dest="lang",
                         help="limit to ISO 639-1 language code"),
     parser.add_argument("--track", dest="track",
@@ -66,7 +75,7 @@ def main():
                         help="Config file containing Twitter keys and secrets")
     parser.add_argument('-p', '--profile', default='main',
                         help="Name of a profile in your configuration file")
-    parser.add_argument('-w', '--warnings', action='store_true', 
+    parser.add_argument('-w', '--warnings', action='store_true',
                         help="Include warning messages in output")
 
     args = parser.parse_args()
@@ -109,11 +118,12 @@ def main():
             args.search,
             since_id=args.since_id,
             max_id=args.max_id,
-            lang=args.lang
+            lang=args.lang,
+            result_type=args.result_type,
         )
     elif args.track or args.follow or args.locations:
         tweets = t.filter(track=args.track, follow=args.follow,
-                locations=args.locations)
+                          locations=args.locations)
     elif args.hydrate:
         tweets = t.hydrate(open(args.hydrate, 'rU'))
     else:
@@ -122,16 +132,19 @@ def main():
 
     # iterate through the tweets and write them to stdout
     for tweet in tweets:
-        
+
         # include warnings in output only if they asked for it
         if 'id_str' in tweet or args.warnings:
             print(json.dumps(tweet))
 
         # add some info to the log
         if "id_str" in tweet:
-            logging.info("archived https://twitter.com/%s/status/%s", tweet['user']['screen_name'], tweet["id_str"])
+            logging.info("archived https://twitter.com/%s/status/%s",
+                         tweet['user']['screen_name'], tweet["id_str"])
         elif 'limit' in tweet:
-            logging.warn("%s tweets undelivered", tweet["limit"]["track"])
+            t = datetime.datetime.utcfromtimestamp(float(tweet["limit"]["timestamp_ms"]) / 1000)
+            t = t.isoformat("T") + "Z"
+            logging.warn("%s tweets undelivered at %s", tweet["limit"]["track"], t)
         elif 'warning' in tweet:
             logging.warn(tweet['warning']['message'])
         else:
@@ -144,13 +157,15 @@ def load_config(filename, profile):
     config = configparser.ConfigParser()
     config.read(filename)
     data = {}
-    for key in ['access_token', 'access_token_secret', 'consumer_key', 'consumer_secret']:
+    for key in ['access_token', 'access_token_secret',
+                'consumer_key', 'consumer_secret']:
         try:
             data[key] = config.get(profile, key)
         except configparser.NoSectionError:
             sys.exit("no such profile %s in %s" % (profile, filename))
         except configparser.NoOptionError:
-            sys.exit("missing %s from profile %s in %s" % (key, profile, filename))
+            sys.exit("missing %s from profile %s in %s" % (
+                        key, profile, filename))
     return data
 
 
@@ -214,7 +229,8 @@ def rate_limit(f):
                     logging.warn("too many errors from Twitter, giving up")
                     resp.raise_for_status()
                 seconds = 60 * errors
-                logging.warn("%s from Twitter API, sleeping %s", resp.status_code, seconds)
+                logging.warn("%s from Twitter API, sleeping %s",
+                             resp.status_code, seconds)
                 time.sleep(seconds)
             else:
                 resp.raise_for_status()
@@ -231,10 +247,26 @@ def catch_conn_reset(f):
         ConnectionError = OpenSSL.SSL.SysCallError
     except:
         ConnectionError = requests.exceptions.ConnectionError
+
     def new_f(self, *args, **kwargs):
         try:
             return f(self, *args, **kwargs)
-        except ConnectionError:
+        except ConnectionError as e:
+            logging.warn("caught connection error: %s", e)
+            self.connect()
+            return f(self, *args, **kwargs)
+    return new_f
+
+
+def catch_timeout(f):
+    """
+    A decorator to handle read timeouts from Twitter.
+    """
+    def new_f(self, *args, **kwargs):
+        try:
+            return f(self, *args, **kwargs)
+        except requests.exceptions.ReadTimeout as e:
+            logging.warn("caught read timeout: %s", e)
             self.connect()
             return f(self, *args, **kwargs)
     return new_f
@@ -264,12 +296,15 @@ class Twarc(object):
         self.access_token = access_token
         self.access_token_secret = access_token_secret
         self.client = None
+        self.last_response = None
         self.connect()
 
-    def search(self, q, max_id=None, since_id=None, lang=None):
+    def search(self, q, max_id=None, since_id=None, lang=None,
+               result_type='recent'):
         """
         Pass in a query with optional max_id, min_id or lang and get
-        back an iterator for decoded tweets.
+        back an iterator for decoded tweets. Defaults to recent (i.e.
+        not mixed, the API default, or popular) tweets.
         """
         logging.info("starting search for %s", q)
         url = "https://api.twitter.com/1.1/search/tweets.json"
@@ -279,6 +314,10 @@ class Twarc(object):
         }
         if lang is not None:
             params['lang'] = lang
+        if result_type in ['mixed', 'recent', 'popular']:
+            params['result_type'] = result_type
+        else:
+            params['result_type'] = 'recent'
 
         while True:
             if since_id:
@@ -379,9 +418,10 @@ class Twarc(object):
 
     @rate_limit
     @catch_conn_reset
+    @catch_timeout
     def get(self, *args, **kwargs):
         try:
-            r = self.client.get(*args, **kwargs)
+            r = self.last_response = self.client.get(*args, **kwargs)
             # this has been noticed, believe it or not
             # https://github.com/edsu/twarc/issues/75
             if r.status_code == 404:
@@ -396,9 +436,11 @@ class Twarc(object):
 
     @rate_limit
     @catch_conn_reset
+    @catch_timeout
     def post(self, *args, **kwargs):
         try:
-            return self.client.post(*args, **kwargs)
+            self.last_response = self.client.post(*args, **kwargs)
+            return self.last_response
         except requests.exceptions.ConnectionError as e:
             logging.error("caught connection error %s", e)
             self.connect()
@@ -406,12 +448,15 @@ class Twarc(object):
 
     def connect(self):
         """
-        Sets up the HTTP session to talk to Twitter. If one is active it is 
+        Sets up the HTTP session to talk to Twitter. If one is active it is
         closed and another one is opened.
         """
         if self.client:
             logging.info("closing existing http session")
             self.client.close()
+        if self.last_response:
+            logging.info("closing last response")
+            self.last_response.close()
         logging.info("creating http session")
         self.client = OAuth1Session(
             client_key=self.consumer_key,

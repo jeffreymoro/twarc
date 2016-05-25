@@ -17,13 +17,13 @@ You will need to have these environment variables set to run these tests:
 
 """
 
+logging.basicConfig(filename="test.log", level=logging.INFO)
+
 consumer_key = os.environ.get('CONSUMER_KEY')
 consumer_secret = os.environ.get('CONSUMER_SECRET')
 access_token = os.environ.get('ACCESS_TOKEN')
 access_token_secret = os.environ.get("ACCESS_TOKEN_SECRET")
 t = Twarc(consumer_key, consumer_secret, access_token, access_token_secret)
-
-logging.basicConfig(filename="test.log", level=logging.INFO)
 
 
 def test_search():
@@ -88,7 +88,6 @@ def test_paging():
 
 
 def test_track():
-    found = False
     tweet = next(t.filter(track="obama"))
     json_str = json.dumps(tweet)
 
@@ -99,12 +98,8 @@ def test_track():
 
 
 def test_follow():
-    users = ["guardian","nytimes","cnnbrk","BBCBreaking","washingtonpost",
-            "BuzzFeedNews", "WSJbreakingnews", "ABCNewsLive", "ReutersLive",
-            "SkyNewsBreak", "AJELive"]
     user_ids = [
         "87818409",   # @guardian
-        "807095",     # @nytimes
         "428333",     # @cnnbrk
         "5402612",    # @BBCBreaking
         "2467791",    # @washingtonpost
@@ -125,9 +120,13 @@ def test_follow():
             found = True
         elif tweet['retweeted_status']['user']['id_str'] in user_ids:
             found = True
-        elif tweet['quoted_status']['user']['id_str'] in user_ids:
+        elif 'quoted_status' in tweet and tweet['quoted_status']['user']['id_str'] in user_ids:
             found = True
         break
+
+    if not found:
+        print("couldn't find user in response")
+        print(json.dumps(tweet, indent=2))
 
     assert found
 
