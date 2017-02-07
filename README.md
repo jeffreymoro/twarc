@@ -1,174 +1,229 @@
 twarc
 =====
 
-[![Build Status](https://secure.travis-ci.org/edsu/twarc.png)](http://travis-ci.org/edsu/twarc) 
-[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/edsu/twarc?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-[![DOI](https://zenodo.org/badge/12737/edsu/twarc.svg)](http://dx.doi.org/10.5281/zenodo.17385)
+[![Build Status](https://secure.travis-ci.org/DocNow/twarc.png)](http://travis-ci.org/DocNow/twarc)
 
-twarc is a command line tool and Python library for archiving Twitter JSON
-data. Each tweet is represented as a JSON object that is exactly what was 
-returned from the Twitter API. Tweets are stored as line-oriented JSON. Twarc runs in three modes: search, filter stream and hydrate. When running in 
-each mode twarc will stop and resume activity in order to work within the 
-Twitter API's [rate limits](https://dev.twitter.com/rest/public/rate-limiting).
+*Translations: [pt-BR]*
+
+twarc is a command line tool and Python library for archiving Twitter JSON data.
+Each tweet is represented as a JSON object that is
+[exactly](https://dev.twitter.com/overview/api/tweets) what was returned from
+the Twitter API.  Tweets are stored as line-oriented JSON.  Twarc will handle
+Twitter API's [rate limits](https://dev.twitter.com/rest/public/rate-limiting)
+for you. In addition to letting you collect tweets Twarc can also help you
+collect users, trends and hydrate tweet ids.
+
+twarc was developed as part of the [Documenting the Now](http://www.docnow.io)
+project which was funded by the [Mellon Foundation](https://mellon.org/).
 
 ## Install
-
-1. install [Python](http://python.org/download) (2 or 3)
-1. pip install twarc
-
-## Twitter API Keys
 
 Before using twarc you will need to register an application at
 [apps.twitter.com](http://apps.twitter.com). Once you've created your
 application, note down the consumer key, consumer secret and then click to
 generate an access token and access token secret. With these four variables
-in hand you are ready to start using twarc. 
+in hand you are ready to start using twarc.
 
-The first time you run twarc it will prompt you for these keys and store them 
-in a `.twarc` file in your home directory. Sometimes it can be handy to store
-multiple authorization keys for different Twitter accounts in your config
-file.  So if you can have multiple profiles to your `.twarc` file, for 
-example:
+1. install [Python](http://python.org/download) (2 or 3)
+2. pip install twarc
 
-    [main]
-    consumer_key=lksdfljklksdjf
-    consumer_secret=lkjsdflkjsdlkfj
-    access_token=lkslksjksljk3039jklj
-    access_token_secret=lksdjfljsdkjfsdlkfj 
+## Quickstart:
 
-    [another]
-    consumer_key=lkjsdflsj
-    consumer_secret=lkjsdflkj
-    access_token=lkjsdflkjsdflkjj
-    access_token_secret=lkjsdflkjsdflkj
+First you're going to need to tell twarc about your API keys:
 
-You then use the other profile with the `--profile` option:
+    twarc configure
 
-    twarc.py --profile another --search ferguson
+Then try out a search:
 
-twarc will also look for authentication keys in the environment if you 
-would prefer to set them there using the following names:
+    twarc search blacklivesmatter > search.json
 
-* CONSUMER\_KEY
-* CONSUMER\_SECRET
-* ACCESS\_TOKEN
-* ACCESS\_TOKEN\_SECRET
+Or maybe you'd like to collect tweets as they happen?
 
-And finally you can pass the authorization keys as arguments to twarc:
+    twarc filter blacklivesmatter > stream.json
 
-    twarc.py --consumer_key foo --consumer_secret bar --access_token baz --access_token_secret bez --search ferguson
+See below for the details about these commands and more.
 
-## Search
+## Usage
 
-When running in search mode twarc will use Twitter's [search
-API](https://dev.twitter.com/rest/reference/get/search/tweets) to retrieve as
-many tweets it can find that match a particular query. So for example, to collect all the tweets mentioning the keyword "ferguson" you would:
+### Configure
 
-    twarc.py --search ferguson > tweets.json
+Once you've got your application keys you can tell twarc what they are with the
+`configure` command.
 
-This command will walk through each page of the search results and write
-each tweet to stdout as line oriented JSON. Twitter's search API only makes
-(roughly) the last week's worth of Tweets available via its search API, so
-time is of the essence if you are trying to collect tweets for something
-that has already happened.
+    twarc configure
 
-## Filter Stream
+This will store your credentials in a file called `.twarc` in your home
+directory so you don't have to keep entering them in. If you would rather supply
+them directly you can set them in the environment (`CONSUMER_KEY`,
+`CONSUMER_SECRET`, `ACCESS_TOKEN`, `ACCESS_TOKEN_SECRET`) or using command line
+options (`--consumer_key`, `--consumer_secret`, `--access_token`,
+`--access_token_secret`).
 
-In filter stream mode twarc will listen to Twitter's [filter stream API](https://dev.twitter.com/streaming/reference/post/statuses/filter) for
-tweets that match a particular filter. You can filter by keywords using
-`--track`, user identifiers using `--follow` and places using `--locations`. 
-Similar to search mode twarc will write these tweets to stdout as line 
-oriented JSON:
+### Search
 
-### Stream tweets containing a keyword
+The uses Twitter's [search/tweets](https://dev.twitter.com/rest/reference/get/search/tweets) to download *pre-existing* tweets matching a given query.
 
-    twarc.py --track "ferguson,blacklivesmatter" > tweets.json
+    twarc search blacklivesmatter > tweets.json
 
-### Stream tweets from/to users
+It's important to note that `search` will return tweets that are found within a
+7 day window that Twitter's search API imposes. If this seems like a small
+window, it is, but you may be interested in collecting tweets as they happen
+using the `filter` and `sample` commands below.
 
-Note: you must use the user identifiers, for example these are the 
-user ids for the @guardian and @nytimes:
+The best way to get familiar with Twitter's search syntax is to experiment with
+[Twitter's Advanced Search](https://twitter.com/search-advanced) and copy and
+pasting the resulting query from the search box. For example here is a more
+complicated query that searches for tweets containing either the
+\#blacklivesmatter or #blm hashtags that were sent to deray.
 
-    twarc.py --follow "87818409,807095" > tweets.json
+    twarc search '#blacklivesmatter OR #blm to:deray' > tweets.json
 
-### Stream tweets from a location
+Twitter attempts to code the language of a tweet, and you can limit your search
+to a particular language if you want:
 
-Note: the leading dash needs to be escaped in the bounding box
-or else it will be interpreted as a command line argument!
+    twarc search '#blacklivesmatter' --lang fr > tweets.json
 
-    twarc.py --locations "\-74,40,-73,41" > tweets.json
+You can also search for tweets with a given location, for example tweets
+mentioning *blacklivesmatter* that are 1 mile from the center of Ferguson,
+Missouri:
 
-Note the syntax for the Twitter's filter queries is slightly different than what queries in their search API. So please consult the [documentation](https://dev.twitter.com/streaming/reference/post/statuses/filter) on how best to express the filter option you are using. Note: the options can be combined, which has the effect of a boolean `or`.
+    twarc search blacklivesmatter --geocode 38.7442,-90.3054,1mi > tweets.json
 
-## Hydrate
+If a search query isn't supplied when using `--geocode` you will get all tweets
+relevant for that location and radius:
 
-The Twitter API's [Terms of Service](https://dev.twitter.com/overview/terms/policy#6._Be_a_Good_Partner_to_Twitter)
-prevent people from making large amounts of raw Twitter data available on the
-Web. The data can be used for research and archived for local use, but not
-shared with the world. Twitter does allow files of tweet identifiers to be
-shared, which can be useful when you would like to make a dataset of tweets
-available. You can then use Twitter's API to *hydrate* the data, or to retrieve
-the full JSON for each identifier. This is particularly important for
-[verification](https://en.wikipedia.org/wiki/Reproducibility) of social media
-research.
+    twarc search --geocode 38.7442,-90.3054,1mi > tweets.json
 
-In hydrate mode twarc will read a file of tweet identifiers and use Twitter's
-[lookup](https://dev.twitter.com/rest/reference/get/statuses/lookup) API to
-fetch the full JSON for each tweet and write it to stdout as line-oriented JSON:
+### Filter
 
-    twarc.py --hydrate ids.txt > tweets.json
+The `filter` command will use Twitter's [statuses/filter](https://dev.twitter.com/streaming/reference/post/statuses/filter) API to collect tweets as they happen.
 
-## Sample Stream
+    twarc filter blacklivesmatter,blm > tweets.json
 
-In sample stream mode twarc will listen to Twitter's 
-[sample stream API](https://dev.twitter.com/streaming/reference/get/statuses/sample) 
-for a random sample of recent public statuses. Similar to search mode and filter stream
-mode, twarc will write these tweets to stdout as line oriented JSON:
+Please note that the syntax for the Twitter's track queries is slightly
+different than what queries in their search API. So please consult the
+documentation on how best to express the filter option you are using.
 
-	twarc.py --sample > tweets.json
+Use the `follow` command line argument if you would like to collect tweets from
+a given user id as they happen. This includes retweets. For example this will
+collect tweets and retweets from CNN:
 
-## User Timeline
+    twarc filter --follow 759251 > tweets.json
 
-In user timeline mode twarc will use Twitter's 
-[user timeline API](https://dev.twitter.com/rest/reference/get/statuses/user_timeline)
-to collect the most recent tweets posted by the user indicated by screen_name:
+You can also collect tweets using a bounding box. Note: the leading dash needs
+to be escaped in the bounding box or else it will be interpreted as a command
+line argument!
 
-	twarc.py --timeline screen_name > tweets.json
+    twarc filter --locations "\-74,40,-73,41" > tweets.json
 
-or by user_id:
 
-	twarc.py --timeline_user_id user_id > tweets.json
+If you combine options they are OR'ed together. For example this will collect
+tweets that use the blacklivesmatter or blm hashtags and also tweets from user
+CNN:
 
-## User Lookup
+    twarc filter blacklivesmatter,blm --follow 759251 > tweets.json
 
-In user lookup mode twarc will use Twitter's 
-[user lookup API](https://dev.twitter.com/rest/reference/get/users/lookup)
-to collect fully hydrated [user objects](https://dev.twitter.com/overview/api/users) 
-for up to 100 users per request as specified by a list of one or more user screen names:
+### Sample
 
-	twarc.py --lookup_screen_names screen_names > users.json
+Use the `sample` command to listen to Twitter's [statuses/sample](https://dev.twitter.com/streaming/reference/get/statuses/sample) API for a "random" sample of recent public statuses.
 
-or user_ids:
+    twarc sample > tweets.json
 
-	twarc.py --lookup_user_ids user_ids > users.json
+### Dehydrate
 
-## Archive
+The `dehydrate` command generates an id list from a file of tweets:
 
-In addition to `twarc.py` when you install twarc you will also get the 
-`twarc-archive.py` command line tool. This uses twarc as a library to
-periodically collect data matching a particular search query. It's useful if you
-don't necessarily want to collect tweets as they happen with the streaming
-api, and are content to run it periodically from cron to collect what you can.
-You will want to adjust the schedule so that it at least runs every 7 days (the
-search API window), and often enough to match the volume of tweets being
-collected. The script will keep the files organized, and is smart enough to
-use the most recent file to determine when it can stop collecting so there are
-no duplicates.
+    twarc dehydrate tweets.json > tweet-ids.txt
 
-For example this will collect all the tweets mentioning the word "ferguson" from
-the search API and write them to a unique file in `/mnt/tweets/ferguson`.
+### Hydrate
 
-    twarc-archive.py ferguson /mnt/tweets/ferguson 
+Twarc's `hydrate` command will read a file of tweet identifiers and write out the tweet JSON for them using Twitter's [status/lookup](https://dev.twitter.com/rest/reference/get/statuses/lookup) API.
+
+    twarc hydrate ids.txt > tweets.json
+
+Twitter API's [Terms of Service](https://dev.twitter.com/overview/terms/policy#6._Be_a_Good_Partner_to_Twitter) discourage people from making large amounts of raw Twitter data available on the Web.  The data can be used for research and archived for local use, but not shared with the world. Twitter does allow files of tweet identifiers to be shared, which can be useful when you would like to make a dataset of tweets available.  You can then use Twitter's API to *hydrate* the data, or to retrieve the full JSON for each identifier. This is particularly important for [verification](https://en.wikipedia.org/wiki/Reproducibility) of social media research.
+
+### Users
+
+The `users` command will return User metadata for the given screen names.
+
+    twarc users deray,Nettaaaaaaaa > users.json
+
+You can also give it user ids:
+
+    twarc users 1232134,1413213 > users.json
+
+If you want you can also use a file of user ids, which can be useful if you are
+using the `followers` and `friends` commands below:
+
+    twarc users ids.txt > users.json
+
+### Followers
+
+The `followers` command  will use Twitter's [follower id API](https://dev.twitter.com/rest/reference/get/followers/ids) to collect the follower user ids for exactly one user screen name per request as specified as an argument:
+
+    twarc followers deray > follower_ids.txt
+
+The result will include exactly one user id per line. The response order is
+reverse chronological, or most recent followers first.
+
+### Friends
+
+Like the `followers` command, the `friends` command will use Twitter's [friend id API](https://dev.twitter.com/rest/reference/get/friends/ids) to collect the friend user ids for exactly one user screen name per request as specified as an argument:
+
+    twarc friends deray > friend_ids.txt
+
+### Trends
+
+The `trends` command lets you retrieve information from Twitter's API about trending hashtags. You need to supply a [Where On Earth](http://developer.yahoo.com/geo/geoplanet/) identifier (`woeid`) to indicate what trends you are interested in. For example here's how you can get the current trends for St Louis:
+
+    twarc trends 2486982
+
+Using a `woeid` of 1 will return trends for the entire planet:
+
+    twarc trends 1
+
+If you aren't sure what to use as a `woeid` just omit it and you will get a list
+of all the places for which Twitter tracks trends:
+
+    twarc trends
+
+If you have a geo-location you can use it instead of the `woedid`.
+
+    twarc trends 39.9062,-79.4679
+
+Behind the scenes twarc will lookup the location using Twitter's [trends/closest](https://dev.twitter.com/rest/reference/get/trends/closest) API to find the nearest `woeid`.
+
+### Timeline
+
+The timeline command will use Twitter's [user timeline API](https://dev.twitter.com/rest/reference/get/statuses/user_timeline) to collect the most recent tweets posted by the user indicated by screen_name.
+
+    twarc timeline deray > tweets.json
+
+You can also look up users using a user id:
+
+    twarc timeline 12345 > tweets.json
+
+### Retweets and Replies
+
+You can get retweets for a given tweet id like so:
+
+    twarc retweets 824077910927691778 > retweets.json
+
+If you want to get the replies to a given tweet you can: 
+
+    twarc replies 824077910927691778 > replies.json
+
+Using the `--recursive` option will also fetch replies to the replies as well as
+quotes.  This can take a long time to complete for a large thread because of
+rate limiting by the search API.
+
+    twarc replies 824077910927691778 --recursive
+
+Unfortunately Twitter's API does not currently support getting replies to a
+tweet. So twarc approximates it by using the search API. Since the search API
+does not support getting tweets older than a week twarc can only get all the
+replies to a tweet that have been sent in the last week.
 
 ## Use as a Library
 
@@ -219,8 +274,8 @@ for tweet in t.hydrate(open('ids.txt')):
 
 In the utils directory there are some simple command line utilities for
 working with the line-oriented JSON, like printing out the archived tweets as
-text or html, extracting the usernames, referenced URLs, etc.  If you
-create a script that is handy please send a pull request.
+text or html, extracting the usernames, referenced URLs, etc.  If you create a
+script that you find handy please send a pull request.
 
 When you've got some tweets you can create a rudimentary wall of them:
 
@@ -229,6 +284,11 @@ When you've got some tweets you can create a rudimentary wall of them:
 You can create a word cloud of tweets you collected about nasa:
 
     % utils/wordcloud.py tweets.json > wordcloud.html
+
+If you've collected some tweets using `conversation` you can create a static D3
+visualization of them with:
+
+    % utils/network.py conversation.json > conversation.html
 
 gender.py is a filter which allows you to filter tweets based on a guess about
 the gender of the author. So for example you can filter out all the tweets that
@@ -247,6 +307,16 @@ Optionally you can export GeoJSON with centroids replacing bounding boxes:
 And if you do export GeoJSON with centroids, you can add some random fuzzing:
 
     % utils/geojson.py tweets.json --centroid --fuzz 0.01 > tweets.geojson
+
+To filter tweets by presence or absence of geo coordinates (or Place, see [API documentation](https://dev.twitter.com/overview/api/places)):
+
+    % utils/geofilter.py tweets.json --yes-coordinates > tweets-with-geocoords.json
+    % cat tweets.json | utils/geofilter.py --no-place > tweets-with-no-place.json
+
+To filter tweets by a GeoJSON fence (requires [Shapely](https://github.com/Toblerity/Shapely)):
+
+    % utils/geofilter.py tweets.json --fence limits.geojson > fenced-tweets.json
+    % cat tweets.json | utils/geofilter.py --fence limits.geojson > fenced-tweets.json
 
 If you suspect you have duplicate in your tweets you can dedupe them:
 
@@ -287,3 +357,4 @@ d3graph.py.
 Each script can also generate an html demo of a D3 visualization, e.g.
 [timelines](https://wallandbinkley.com/twarc/bill10/) or a
 [directed graph of retweets](https://wallandbinkley.com/twarc/bill10/directed-retweets.html).
+[pt-BR]: https://github.com/DocNow/twarc/blob/master/README_pt_br.md
